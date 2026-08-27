@@ -10,6 +10,7 @@ public final class HoldemConfig {
     private final Plugin plugin;
 
     private final int seatCount;
+    private final double seatRadius;
     private final long smallBlind;
     private final long bigBlind;
     private final long startingStack;
@@ -22,6 +23,7 @@ public final class HoldemConfig {
         FileConfiguration config = plugin.getConfig();
 
         this.seatCount = config.getInt("table.seat-count", 6);
+        this.seatRadius = config.getDouble("table.seat-radius", 2.3);
         this.smallBlind = config.getLong("blinds.small", 50);
         this.bigBlind = config.getLong("blinds.big", 100);
         this.startingStack = config.getLong("chips.starting-stack", 10000);
@@ -31,6 +33,10 @@ public final class HoldemConfig {
 
     public int seatCount() {
         return seatCount;
+    }
+
+    public double seatRadius() {
+        return seatRadius;
     }
 
     public long smallBlind() {

@@ -6,9 +6,6 @@ author: tank1114
 description: 實體牌桌德州撲克，固定六人桌，虛擬籌碼。
 
 commands:
-  holdem:
-    description: 德州撲克玩家指令（坐下後用來下注）
-    usage: /<command> <fold|check|call|bet|raise|allin|leave>
   holdemadmin:
     description: 德州撲克管理指令
     usage: /<command> <setup|start|reset|rebuy|chips>

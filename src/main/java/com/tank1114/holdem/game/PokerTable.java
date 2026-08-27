@@ -54,6 +54,12 @@ public final class PokerTable {
     private long minRaiseIncrement;
 
     private BukkitTask turnTimeoutTask;
+    private TurnUi turnUi;
+
+    /** Lets a UI layer (a GUI menu) present itself whenever it becomes a seated player's turn to act. */
+    public interface TurnUi {
+        void promptTurn(Player player, int seatIndex);
+    }
 
     public PokerTable(Plugin plugin, TableDisplayManager display, ChipStorage chipStorage, HoldemConfig config) {
         this.plugin = plugin;
@@ -80,6 +86,23 @@ public final class PokerTable {
 
     public List<Card> community() {
         return community;
+    }
+
+    public long currentBet() {
+        return currentBet;
+    }
+
+    public long minRaiseIncrement() {
+        return minRaiseIncrement;
+    }
+
+    public long bigBlind() {
+        return config.bigBlind();
+    }
+
+    /** Lets the UI layer (the GUI action menu) know to present itself whenever it becomes someone's turn. */
+    public void setTurnUi(TurnUi turnUi) {
+        this.turnUi = turnUi;
     }
 
     public long potTotal() {
@@ -452,12 +475,11 @@ public final class PokerTable {
     private void promptTurn(int seatIndex) {
         Seat seat = seats[seatIndex];
         Player player = Bukkit.getPlayer(seat.occupant());
-        long toCall = currentBet - seat.committedThisRound();
         if (player != null) {
-            String hint = toCall > 0
-                    ? "需要跟注 " + toCall + "。可用：/holdem fold, call, raise <總下注>, allin"
-                    : "可以看牌或下注。可用：/holdem fold, check, bet <金額>, allin";
-            player.sendMessage(Component.text("輪到你行動了！底池：" + potTotal() + "。" + hint));
+            player.sendMessage(Component.text("輪到你行動了！底池：" + potTotal() + "。"));
+            if (turnUi != null) {
+                turnUi.promptTurn(player, seatIndex);
+            }
         }
         broadcast("輪到 " + seat.occupantName() + " 行動。");
 

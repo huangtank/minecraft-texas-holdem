@@ -14,10 +14,21 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.util.StringUtil;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /** /holdemadmin setup|start|reset|rebuy|chips - table setup and rescue tools for operators. */
-public final class HoldemAdminCommand implements CommandExecutor {
+public final class HoldemAdminCommand implements CommandExecutor, TabCompleter {
+
+    private static final List<String> TOP_LEVEL = List.of("setup", "start", "reset", "rebuy", "chips");
+    private static final List<String> SETUP_ARGS = List.of("center", "status");
+    private static final List<String> REBUY_MODES = List.of("AUTO", "DISABLED", "ADMIN_ONLY");
+    private static final List<String> CHIPS_ARGS = List.of("give", "set");
 
     private final PokerTable table;
     private final TableDisplayManager display;
@@ -39,7 +50,7 @@ public final class HoldemAdminCommand implements CommandExecutor {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
-            sender.sendMessage(Component.text("用法：/holdemadmin <setup|start|reset|rebuy|chips>"));
+            sendTopLevelUsage(sender);
             return true;
         }
 
@@ -50,13 +61,25 @@ public final class HoldemAdminCommand implements CommandExecutor {
                 table.forceReset();
                 sender.sendMessage(Component.text(display.isBuilt()
                         ? "已重置牌桌。"
-                        : "已重置牌桌狀態（提醒：牌桌座標還沒設定完成，用 /holdemadmin setup status 檢查）。"));
+                        : "已重置牌桌狀態（提醒：牌桌中心點還沒設定，用 /holdemadmin setup center 設定）。"));
             }
             case "rebuy" -> handleRebuy(sender, args);
             case "chips" -> handleChips(sender, args);
-            default -> sender.sendMessage(Component.text("用法：/holdemadmin <setup|start|reset|rebuy|chips>"));
+            default -> sendTopLevelUsage(sender);
         }
         return true;
+    }
+
+    private void sendTopLevelUsage(CommandSender sender) {
+        sender.sendMessage(Component.text(String.join("\n",
+                "德州撲克管理指令：",
+                "  /holdemadmin setup center   站在要放牌桌中心（公共牌）的位置，設定好會自動生成 1~"
+                        + layout.seatCount() + " 號座位",
+                "  /holdemadmin setup status   查看牌桌設定狀態",
+                "  /holdemadmin start          強制開始新的一局（需要 ≥2 人入座、牌桌已設定）",
+                "  /holdemadmin reset          卡關時強制重置，退還這局已下注的籌碼",
+                "  /holdemadmin rebuy <AUTO|DISABLED|ADMIN_ONLY>   切換籌碼歸零後的補充規則",
+                "  /holdemadmin chips <give|set> <玩家> <金額>     調整玩家籌碼")));
     }
 
     private void handleSetup(CommandSender sender, String[] args) {
@@ -65,59 +88,29 @@ public final class HoldemAdminCommand implements CommandExecutor {
             return;
         }
         if (args.length < 2) {
-            sender.sendMessage(Component.text("用法：/holdemadmin setup <center|seat> [座位編號]，或 /holdemadmin setup status"));
+            sender.sendMessage(Component.text("用法：/holdemadmin setup <center|status>"));
             return;
         }
         switch (args[1].toLowerCase()) {
             case "center" -> {
                 layout.setCenter(player.getLocation());
                 layoutStorage.save(layout);
-                sender.sendMessage(Component.text("已把公共牌位置設定在你目前的位置。"));
-                rebuildIfComplete(sender);
-            }
-            case "seat" -> {
-                if (args.length < 3) {
-                    sender.sendMessage(Component.text("用法：/holdemadmin setup seat <1~" + layout.seatCount() + ">"));
-                    return;
-                }
-                int seatNumber;
-                try {
-                    seatNumber = Integer.parseInt(args[2]);
-                } catch (NumberFormatException e) {
-                    sender.sendMessage(Component.text("座位編號必須是數字。"));
-                    return;
-                }
-                if (seatNumber < 1 || seatNumber > layout.seatCount()) {
-                    sender.sendMessage(Component.text("座位編號要在 1~" + layout.seatCount() + " 之間。"));
-                    return;
-                }
-                layout.setSeat(seatNumber - 1, player.getLocation());
-                layoutStorage.save(layout);
-                sender.sendMessage(Component.text("已把第 " + seatNumber + " 號座位設定在你目前的位置與朝向。"));
-                rebuildIfComplete(sender);
+                display.rebuild(layout);
+                sender.sendMessage(Component.text("已把牌桌中心設定在你目前的位置與朝向，"
+                        + layout.seatCount() + " 個座位已自動生成在四周並面向中心。"));
             }
             case "status" -> {
-                StringBuilder sb = new StringBuilder("牌桌設定狀態：中心點 ")
-                        .append(layout.center() != null ? "已設定" : "未設定");
-                for (int i = 0; i < layout.seatCount(); i++) {
-                    sb.append("\n第 ").append(i + 1).append(" 號座位：").append(layout.seat(i) != null ? "已設定" : "未設定");
-                }
-                sender.sendMessage(Component.text(sb.toString()));
+                String centerStatus = layout.center() != null ? "已設定（" + layout.seatCount() + " 個座位已自動生成）" : "未設定";
+                sender.sendMessage(Component.text("牌桌設定狀態：中心點 " + centerStatus
+                        + "\n用 /holdemadmin setup center 站到想放桌子的地方即可重新設定。"));
             }
-            default -> sender.sendMessage(Component.text("用法：/holdemadmin setup <center|seat|status>"));
-        }
-    }
-
-    private void rebuildIfComplete(CommandSender sender) {
-        if (layout.isComplete()) {
-            display.rebuild(layout);
-            sender.sendMessage(Component.text("牌桌所有位置都設定好了，已經生成牌桌上的顯示物件。"));
+            default -> sender.sendMessage(Component.text("用法：/holdemadmin setup <center|status>"));
         }
     }
 
     private void handleStart(CommandSender sender) {
         if (!display.isBuilt()) {
-            sender.sendMessage(Component.text("牌桌還沒設定完成，請先用 /holdemadmin setup 設定中心點與所有座位。"));
+            sender.sendMessage(Component.text("牌桌還沒設定完成，請先用 /holdemadmin setup center 設定中心點。"));
             return;
         }
         if (table.stage() != GameStage.WAITING) {
@@ -130,7 +123,9 @@ public final class HoldemAdminCommand implements CommandExecutor {
 
     private void handleRebuy(CommandSender sender, String[] args) {
         if (args.length < 2) {
-            sender.sendMessage(Component.text("目前模式：" + config.rebuyMode() + "。用法：/holdemadmin rebuy <AUTO|DISABLED|ADMIN_ONLY>"));
+            sender.sendMessage(Component.text("目前模式：" + config.rebuyMode()
+                    + "。用法：/holdemadmin rebuy <AUTO|DISABLED|ADMIN_ONLY>"
+                    + "\nAUTO=自動補回起始籌碼，DISABLED=不能再要，ADMIN_ONLY=需要管理員手動補"));
             return;
         }
         try {
@@ -144,7 +139,8 @@ public final class HoldemAdminCommand implements CommandExecutor {
 
     private void handleChips(CommandSender sender, String[] args) {
         if (args.length < 4 || !(args[1].equalsIgnoreCase("give") || args[1].equalsIgnoreCase("set"))) {
-            sender.sendMessage(Component.text("用法：/holdemadmin chips <give|set> <玩家> <金額>"));
+            sender.sendMessage(Component.text("用法：/holdemadmin chips <give|set> <玩家> <金額>"
+                    + "\ngive=在現有籌碼上加上這個金額，set=直接把籌碼設成這個金額"));
             return;
         }
         OfflinePlayer target = Bukkit.getOfflinePlayer(args[2]);
@@ -174,5 +170,29 @@ public final class HoldemAdminCommand implements CommandExecutor {
             return table.seat(seatIndex).stack();
         }
         return chipStorage.get(target.getUniqueId());
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length == 1) {
+            return partial(args[0], TOP_LEVEL);
+        }
+        return switch (args[0].toLowerCase()) {
+            case "setup" -> args.length == 2 ? partial(args[1], SETUP_ARGS) : List.of();
+            case "rebuy" -> args.length == 2 ? partial(args[1], REBUY_MODES) : List.of();
+            case "chips" -> switch (args.length) {
+                case 2 -> partial(args[1], CHIPS_ARGS);
+                case 3 -> partial(args[2], Bukkit.getOnlinePlayers().stream().map(Player::getName).toList());
+                case 4 -> List.of("100", "1000", "10000");
+                default -> List.of();
+            };
+            default -> List.of();
+        };
+    }
+
+    private List<String> partial(String token, List<String> options) {
+        List<String> matches = new ArrayList<>();
+        StringUtil.copyPartialMatches(token, options, matches);
+        return matches.stream().sorted().collect(Collectors.toList());
     }
 }

@@ -7,6 +7,9 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.type.Stairs;
+import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
@@ -46,6 +49,8 @@ public final class TableDisplayManager {
     private final NamespacedKey seatIndexKey;
 
     private Interaction[] seatMarkers;
+    private BlockDisplay[] chairProps;
+    private BlockDisplay tableProp;
     private ItemDisplay[][] holeCardDisplays; // [seat][0 or 1]
     private ItemDisplay[] communityCardDisplays; // size 5
     private final Map<UUID, Integer> seatMarkerToSeat = new HashMap<>();
@@ -71,6 +76,7 @@ public final class TableDisplayManager {
 
         int seatCount = layout.seatCount();
         seatMarkers = new Interaction[seatCount];
+        chairProps = new BlockDisplay[seatCount];
         holeCardDisplays = new ItemDisplay[seatCount][2];
         communityCardDisplays = new ItemDisplay[5];
         seatMarkerToSeat.clear();
@@ -79,6 +85,7 @@ public final class TableDisplayManager {
             Location seatLoc = layout.seat(i);
             seatMarkers[i] = spawnSeatMarker(seatLoc, i);
             seatMarkerToSeat.put(seatMarkers[i].getUniqueId(), i);
+            chairProps[i] = spawnChairProp(seatLoc);
 
             Vector right = rightVector(seatLoc);
             Location base = seatLoc.clone().add(0, SEAT_CARD_UP, 0)
@@ -90,6 +97,8 @@ public final class TableDisplayManager {
         }
 
         Location center = layout.center();
+        double tableRadius = layout.seatCount() > 0 ? center.distance(layout.seat(0)) * 0.75 : 1.5;
+        tableProp = spawnTableProp(center, tableRadius);
         Vector right = rightVector(center);
         Location communityBase = center.clone().add(0, COMMUNITY_UP, 0);
         for (int i = 0; i < 5; i++) {
@@ -116,6 +125,16 @@ public final class TableDisplayManager {
                 }
             }
         }
+        if (chairProps != null) {
+            for (BlockDisplay chair : chairProps) {
+                if (chair != null && chair.isValid()) {
+                    chair.remove();
+                }
+            }
+        }
+        if (tableProp != null && tableProp.isValid()) {
+            tableProp.remove();
+        }
         if (holeCardDisplays != null) {
             for (ItemDisplay[] pair : holeCardDisplays) {
                 for (ItemDisplay display : pair) {
@@ -134,6 +153,8 @@ public final class TableDisplayManager {
         }
         seatMarkerToSeat.clear();
         seatMarkers = null;
+        chairProps = null;
+        tableProp = null;
         holeCardDisplays = null;
         communityCardDisplays = null;
     }
@@ -240,8 +261,56 @@ public final class TableDisplayManager {
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
             entity.getPersistentDataContainer().set(seatIndexKey, PersistentDataType.INTEGER, seatIndex);
+            entity.customName(Component.text("第 " + (seatIndex + 1) + " 號座位"));
+            entity.setCustomNameVisible(true);
         });
         return interaction;
+    }
+
+    /** Purely decorative "chair" so a seat is visible before anyone's ever sat there or a hand's been dealt. */
+    private BlockDisplay spawnChairProp(Location seatLoc) {
+        return seatLoc.getWorld().spawn(seatLoc, BlockDisplay.class, entity -> {
+            Stairs stairs = (Stairs) org.bukkit.Material.OAK_STAIRS.createBlockData();
+            stairs.setFacing(yawToFacing(seatLoc.getYaw()));
+            entity.setBlock(stairs);
+            entity.setPersistent(true);
+            entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
+            entity.setTransformation(new Transformation(
+                    new Vector3f(-0.5f, 0f, -0.5f),
+                    new Quaternionf(),
+                    new Vector3f(1f, 1f, 1f),
+                    new Quaternionf()
+            ));
+        });
+    }
+
+    /** Purely decorative "tabletop" under the community cards so the table is visible even with no cards dealt. */
+    private BlockDisplay spawnTableProp(Location center, double radius) {
+        return center.getWorld().spawn(center, BlockDisplay.class, entity -> {
+            entity.setBlock(org.bukkit.Material.SMOOTH_STONE_SLAB.createBlockData());
+            entity.setPersistent(true);
+            entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
+            float diameter = (float) (radius * 2);
+            entity.setTransformation(new Transformation(
+                    new Vector3f(-diameter / 2f, (float) (COMMUNITY_UP - 0.4), -diameter / 2f),
+                    new Quaternionf(),
+                    new Vector3f(diameter, 1f, diameter),
+                    new Quaternionf()
+            ));
+        });
+    }
+
+    private BlockFace yawToFacing(float yaw) {
+        float normalized = ((yaw % 360) + 360) % 360;
+        if (normalized >= 315 || normalized < 45) {
+            return BlockFace.SOUTH;
+        } else if (normalized < 135) {
+            return BlockFace.WEST;
+        } else if (normalized < 225) {
+            return BlockFace.NORTH;
+        } else {
+            return BlockFace.EAST;
+        }
     }
 
     private ItemDisplay spawnCardDisplay(Location location) {

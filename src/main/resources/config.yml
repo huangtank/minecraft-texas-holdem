@@ -1,6 +1,8 @@
 # 德州撲克設定
 table:
   seat-count: 6
+  # 座位跟中心點的距離（單位：方塊），座位會自動平均分布在中心點四周並面朝中心
+  seat-radius: 2.3
 
 blinds:
   small: 50

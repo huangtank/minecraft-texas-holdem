@@ -11,7 +11,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.logging.Level;
 
-/** Persists the one fixed table's center + seat locations to table.yml. */
+/** Persists the one fixed table's center point to table.yml. Seats are derived from it, not stored. */
 public final class LayoutStorage {
 
     private final Plugin plugin;
@@ -22,25 +22,19 @@ public final class LayoutStorage {
         this.file = new File(plugin.getDataFolder(), "table.yml");
     }
 
-    public TableLayout load(int seatCount) {
-        TableLayout layout = new TableLayout(seatCount);
+    public TableLayout load(int seatCount, double seatRadius) {
+        TableLayout layout = new TableLayout(seatCount, seatRadius);
         if (!file.exists()) {
             return layout;
         }
         YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
         layout.setCenter(readLocation(yaml, "center"));
-        for (int i = 0; i < seatCount; i++) {
-            layout.setSeat(i, readLocation(yaml, "seats." + i));
-        }
         return layout;
     }
 
     public void save(TableLayout layout) {
         YamlConfiguration yaml = new YamlConfiguration();
         writeLocation(yaml, "center", layout.center());
-        for (int i = 0; i < layout.seatCount(); i++) {
-            writeLocation(yaml, "seats." + i, layout.seat(i));
-        }
         try {
             yaml.save(file);
         } catch (IOException e) {
