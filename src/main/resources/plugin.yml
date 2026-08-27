@@ -1,0 +1,23 @@
+name: TexasHoldem
+version: '${version}'
+main: com.tank1114.holdem.HoldemPlugin
+api-version: '26.2'
+author: tank1114
+description: 實體牌桌德州撲克，固定六人桌，虛擬籌碼。
+
+commands:
+  holdem:
+    description: 德州撲克玩家指令（坐下後用來下注）
+    usage: /<command> <fold|check|call|bet|raise|allin|leave>
+  holdemadmin:
+    description: 德州撲克管理指令
+    usage: /<command> <setup|start|reset|rebuy|chips>
+    permission: holdem.admin
+
+permissions:
+  holdem.play:
+    description: 允許入座與遊玩德州撲克
+    default: true
+  holdem.admin:
+    description: 允許設定牌桌、強制重置、調整籌碼規則
+    default: op

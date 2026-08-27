@@ -1,0 +1,20 @@
+# 德州撲克設定
+table:
+  seat-count: 6
+
+blinds:
+  small: 50
+  big: 100
+
+chips:
+  # 玩家第一次坐上牌桌時的起始籌碼
+  starting-stack: 10000
+  # 籌碼歸零後的處理方式：
+  #   AUTO        自動免費補回起始籌碼
+  #   DISABLED    不能再要，只能離座
+  #   ADMIN_ONLY  需要管理員用 /holdemadmin chips give 手動補
+  rebuy-mode: AUTO
+
+turn:
+  # 輪到玩家但超過這個秒數未行動，自動視為棄牌
+  timeout-seconds: 60
