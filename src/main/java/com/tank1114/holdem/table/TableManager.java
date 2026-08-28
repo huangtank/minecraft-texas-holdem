@@ -80,7 +80,13 @@ public final class TableManager {
         return new TableInstance(id, layout, table, display, turnMenu);
     }
 
-    /** Voids the table's current hand, kicks every seated player out (refunding chips), and removes it entirely. */
+    /**
+     * Voids the table's current hand, kicks every seated player out (refunding chips), and removes
+     * it entirely. Also runs the same orphan sweep as {@link #cleanupOrphans()}: this table's own
+     * entities are already gone via teardown() above, but its center no longer counts as "live" for
+     * that sweep either, so anything left behind nearby from an even older, already-forgotten setup
+     * at roughly the same spot gets swept up too instead of needing a separate manual cleanup.
+     */
     public String deleteTable(int id) {
         TableInstance instance = tables.remove(id);
         if (instance == null) {
@@ -90,7 +96,7 @@ public final class TableManager {
         HandlerList.unregisterAll(instance.turnMenu());
         instance.display().teardown();
         layoutStorage.delete(id);
-        return null;
+        return "已刪除第 " + id + " 號桌子，所有玩家已被退回籌碼並離座。\n" + cleanupOrphans();
     }
 
     public String startTable(int id) {

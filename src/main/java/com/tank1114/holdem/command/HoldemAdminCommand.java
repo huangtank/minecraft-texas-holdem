@@ -92,8 +92,7 @@ public final class HoldemAdminCommand implements CommandExecutor, TabCompleter {
                 if (id == null) {
                     return;
                 }
-                String error = tableManager.deleteTable(id);
-                sender.sendMessage(Component.text(error != null ? error : "已刪除第 " + id + " 號桌子，所有玩家已被退回籌碼並離座。"));
+                sender.sendMessage(Component.text(tableManager.deleteTable(id)));
             }
             case "cleanup" -> sender.sendMessage(Component.text(tableManager.cleanupOrphans()));
             default -> sender.sendMessage(Component.text("用法：/holdemadmin table <create|list|delete|cleanup>"));

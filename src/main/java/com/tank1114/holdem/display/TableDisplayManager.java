@@ -352,7 +352,9 @@ public final class TableDisplayManager {
 
     private Interaction spawnSeatMarker(Location location, int seatIndex) {
         Interaction interaction = location.getWorld().spawn(location, Interaction.class, entity -> {
-            entity.setInteractionWidth(0.8f);
+            // Matches the chair's own 1x1 footprint (see spawnChairProp) so the visible stair
+            // model sits fully inside its own clickable box instead of poking out past it.
+            entity.setInteractionWidth(1.0f);
             entity.setInteractionHeight(1.9f);
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
@@ -367,13 +369,14 @@ public final class TableDisplayManager {
     private BlockDisplay spawnChairProp(Location seatLoc) {
         return seatLoc.getWorld().spawn(seatLoc, BlockDisplay.class, entity -> {
             Stairs stairs = (Stairs) org.bukkit.Material.OAK_STAIRS.createBlockData();
-            // 這裡我相信 Gemini
-            // 1. 不要設定 BlockFace，讓方塊保持預設基準，避免與矩陣旋轉發生坐標系衝突
+            // Pin the block's own baked-in model orientation to a known, fixed reference (SOUTH,
+            // i.e. local +Z) instead of leaving it at whatever createBlockData()'s undocumented
+            // default happens to be. yawRotatedUnitBlock below rotates *from* that known reference,
+            // so its math only holds if the baseline is actually pinned down here.
+            stairs.setFacing(BlockFace.SOUTH);
             entity.setBlock(stairs);
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
-            
-            // 2. 統一由 yawRotatedUnitBlock 透過座位角度進行精準的旋轉與置中對齊
             entity.setTransformation(yawRotatedUnitBlock(seatLoc.getYaw()));
         });
     }
@@ -383,11 +386,22 @@ public final class TableDisplayManager {
      * Six seats are spaced 60 degrees apart, but {@link org.bukkit.block.data.type.Stairs}'s "facing"
      * block state only offers 4 cardinal directions - snapping to the nearest one would leave most
      * chairs up to 30 degrees off. Rotating the display's transformation instead hits the exact angle.
+     *
+     * <p>A display's transformation always rotates local points around local origin (0,0,0) - one
+     * corner of the unit cube - never its center. To make the block stay centered on the seat's own
+     * location (matching where the interaction hitbox above is centered) regardless of yaw, the
+     * translation has to land the cube's own center exactly on the entity's position: for local point
+     * {@code p}, the final world offset is {@code R*p + T}; solving {@code R*center + T = 0} (the
+     * center must map to offset zero, i.e. the entity's own spot) gives {@code T = -R*center}. Only
+     * the X/Z half of "center" belongs in that vector, though - a block's local Y already spans 0..1
+     * exactly as wanted (sitting on the ground, not centered vertically), so the Y component of
+     * "center" must be 0, not 0.5, or every seat's chair ends up pushed sideways by an extra half
+     * block in whatever direction that seat's own rotation happens to point.
      */
     private Transformation yawRotatedUnitBlock(float yawDegrees) {
         Quaternionf rotation = new Quaternionf().rotateY((float) Math.toRadians(-yawDegrees));
-        Vector3f center = new Vector3f(0.5f, 0.5f, 0.5f);
-        Vector3f translation = new Vector3f(center).sub(rotation.transform(new Vector3f(center)));
+        Vector3f horizontalCenter = new Vector3f(0.5f, 0f, 0.5f);
+        Vector3f translation = rotation.transform(new Vector3f(horizontalCenter)).mul(-1f);
         return new Transformation(translation, rotation, new Vector3f(1f, 1f, 1f), new Quaternionf());
     }
 
