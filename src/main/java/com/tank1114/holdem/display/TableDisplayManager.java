@@ -60,7 +60,9 @@ public final class TableDisplayManager {
     private static final double AVATAR_FORWARD = 0.15;
 
     private final Plugin plugin;
+    private final int tableId;
     private final NamespacedKey managedKey;
+    private final NamespacedKey tableIdKey;
     private final NamespacedKey seatIndexKey;
 
     private Interaction[] seatMarkers;
@@ -72,9 +74,11 @@ public final class TableDisplayManager {
     private UUID[] seatOccupants; // tracks who's seated where, purely to drive per-seat community-card visibility
     private final Map<UUID, Integer> seatMarkerToSeat = new HashMap<>();
 
-    public TableDisplayManager(Plugin plugin) {
+    public TableDisplayManager(Plugin plugin, int tableId) {
         this.plugin = plugin;
+        this.tableId = tableId;
         this.managedKey = new NamespacedKey(plugin, "managed");
+        this.tableIdKey = new NamespacedKey(plugin, "table-id");
         this.seatIndexKey = new NamespacedKey(plugin, "seat-index");
     }
 
@@ -132,11 +136,19 @@ public final class TableDisplayManager {
         }
     }
 
-    /** Removes every entity this plugin previously tagged within range of the table, in case of a stale reload. */
+    /**
+     * Removes this exact table's own entities left over near its center from a previous run that
+     * didn't shut down cleanly (they're all {@code setPersistent(true)}, so they'd otherwise still
+     * be sitting there when the world reloads them, duplicating everything rebuild() is about to
+     * spawn). Filtered to this table's own id, not just "any managed entity" - two tables can easily
+     * sit within each other's search radius, and this must never touch a *different* table's entities
+     * just because it happens to be nearby.
+     */
     private void removeStaleManagedEntities(Location center) {
         for (Entity entity : center.getWorld().getNearbyEntities(center, MANAGED_ENTITY_SEARCH_RADIUS,
                 MANAGED_ENTITY_SEARCH_RADIUS, MANAGED_ENTITY_SEARCH_RADIUS)) {
-            if (entity.getPersistentDataContainer().has(managedKey, PersistentDataType.BYTE)) {
+            Integer ownerId = entity.getPersistentDataContainer().get(tableIdKey, PersistentDataType.INTEGER);
+            if (ownerId != null && ownerId == tableId) {
                 entity.remove();
             }
         }
@@ -289,6 +301,7 @@ public final class TableDisplayManager {
             entity.setMarker(true);
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
+            entity.getPersistentDataContainer().set(tableIdKey, PersistentDataType.INTEGER, tableId);
             ItemStack skull = new ItemStack(Material.PLAYER_HEAD);
             SkullMeta meta = (SkullMeta) skull.getItemMeta();
             meta.setOwningPlayer(player);
@@ -431,6 +444,7 @@ public final class TableDisplayManager {
             entity.setInteractionHeight(1.9f);
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
+            entity.getPersistentDataContainer().set(tableIdKey, PersistentDataType.INTEGER, tableId);
             entity.getPersistentDataContainer().set(seatIndexKey, PersistentDataType.INTEGER, seatIndex);
             entity.customName(Component.text("第 " + (seatIndex + 1) + " 號座位"));
             entity.setCustomNameVisible(true);
@@ -450,6 +464,7 @@ public final class TableDisplayManager {
             entity.setBlock(stairs);
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
+            entity.getPersistentDataContainer().set(tableIdKey, PersistentDataType.INTEGER, tableId);
             entity.setTransformation(yawRotatedUnitBlock(seatLoc.getYaw()));
         });
     }
@@ -484,6 +499,7 @@ public final class TableDisplayManager {
             entity.setBlock(org.bukkit.Material.SMOOTH_STONE_SLAB.createBlockData());
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
+            entity.getPersistentDataContainer().set(tableIdKey, PersistentDataType.INTEGER, tableId);
             float diameter = (float) (radius * 2);
             // Slab block models occupy the bottom half (y 0 to 0.5) of their local unit cube, so
             // translating up by (TABLE_SURFACE_UP - 0.5) puts the slab's flat top exactly at
@@ -503,6 +519,7 @@ public final class TableDisplayManager {
             entity.setBillboard(Display.Billboard.CENTER);
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
+            entity.getPersistentDataContainer().set(tableIdKey, PersistentDataType.INTEGER, tableId);
             entity.setTransformation(new Transformation(
                     new Vector3f(0f, 0f, 0f),
                     new Quaternionf(),

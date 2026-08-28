@@ -184,6 +184,10 @@ public final class TurnHologramMenu implements Listener, PokerTable.TurnUi {
         for (int i = 0; i < 9; i++) {
             inventory.setItem(i, i < buttons.size() ? buildActionItem(buttons.get(i)) : null);
         }
+        // setItem() alone doesn't always reach the client's already-open hotbar reliably - without
+        // this, the new items could sit there server-side but not actually render until the player
+        // did something else (e.g. opening their inventory) that happened to force a resync.
+        player.updateInventory();
         currentSeat = seatIndex;
     }
 
@@ -196,6 +200,7 @@ public final class TurnHologramMenu implements Listener, PokerTable.TurnUi {
                 for (int i = 0; i < 9; i++) {
                     inventory.setItem(i, savedHotbar[i]);
                 }
+                actor.updateInventory();
             }
         }
         currentActorUuid = null;

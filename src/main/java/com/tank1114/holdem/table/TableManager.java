@@ -90,7 +90,13 @@ public final class TableManager {
         TableLayout layout = new TableLayout(config.seatCount(), config.seatRadius());
         layout.setCenter(center);
 
-        TableDisplayManager display = new TableDisplayManager(plugin);
+        // Force the chunk to load before spawning anything in it. This matters most right after
+        // server startup (loadAll() runs from onEnable(), well before any player has walked the
+        // table's chunk into existence) - spawning table entities into an unloaded chunk is what
+        // left tables silently cardless until they were deleted and recreated.
+        center.getWorld().getChunkAt(center).load();
+
+        TableDisplayManager display = new TableDisplayManager(plugin, id);
         display.rebuild(layout);
 
         PokerTable table = new PokerTable(plugin, display, chipStorage, config);
