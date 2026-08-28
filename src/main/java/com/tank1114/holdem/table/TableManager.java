@@ -20,10 +20,10 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Owns every table this plugin runs, keyed by a stable numeric id that an admin uses to
- * target one from a command. Ids are handed out in increasing order and are never reused
- * within a server's lifetime, even after a table is deleted, so an id always refers to
- * exactly the table an admin remembers creating.
+ * Owns every table this plugin runs, keyed by a numeric id that an admin uses to target one
+ * from a command. An admin can request a specific id when creating a table; left unspecified,
+ * the id is auto-assigned as the smallest positive integer not currently in use - so deleting
+ * table 2 out of {1, 2, 3} means the next auto-assigned table becomes 2 again, not 4.
  */
 public final class TableManager {
 
@@ -34,7 +34,6 @@ public final class TableManager {
     private final BetAmountChatListener chatListener;
 
     private final Map<Integer, TableInstance> tables = new LinkedHashMap<>();
-    private int nextId = 1;
 
     public TableManager(Plugin plugin, HoldemConfig config, ChipStorage chipStorage,
                          LayoutStorage layoutStorage, BetAmountChatListener chatListener) {
@@ -50,18 +49,40 @@ public final class TableManager {
         for (Map.Entry<Integer, Location> entry : layoutStorage.loadAll().entrySet()) {
             int id = entry.getKey();
             tables.put(id, build(id, entry.getValue()));
-            nextId = Math.max(nextId, id + 1);
         }
         plugin.getLogger().info(tables.isEmpty()
                 ? "目前沒有已設定的牌桌，請用 /holdemadmin table create 建立第一張。"
                 : "已從 table.yml 讀取 " + tables.size() + " 張牌桌。");
     }
 
-    /** Creates a brand-new table centered on the given location, assigns it the next id, and persists it. */
-    public int createTable(Location center) {
-        int id = nextId++;
+    /**
+     * Creates a brand-new table centered on the given location. If {@code requestedId} is given,
+     * uses exactly that id (failing if it's already taken); otherwise auto-assigns the smallest
+     * free id starting from 1, filling in whatever a deleted table left behind.
+     */
+    public String createTable(Location center, Integer requestedId) {
+        int id;
+        if (requestedId != null) {
+            if (requestedId < 1) {
+                return "桌子編號必須是正整數。";
+            }
+            if (tables.containsKey(requestedId)) {
+                return "第 " + requestedId + " 號桌子已經存在，請換一個編號或留空自動分配。";
+            }
+            id = requestedId;
+        } else {
+            id = nextAvailableId();
+        }
         tables.put(id, build(id, center));
         layoutStorage.save(id, center);
+        return "已建立第 " + id + " 號牌桌，" + config.seatCount() + " 個座位已自動生成在四周並面向中心。";
+    }
+
+    private int nextAvailableId() {
+        int id = 1;
+        while (tables.containsKey(id)) {
+            id++;
+        }
         return id;
     }
 

@@ -34,7 +34,6 @@ public final class PokerTable {
     private static final long RUNOUT_DELAY_TICKS = 30L; // 1.5s pause between auto-dealt streets when everyone's all-in
     private static final long SHOWDOWN_DELAY_TICKS = 160L; // 8s to let people read the result before the table clears
     private static final long FOLD_WIN_DELAY_TICKS = 80L; // 4s
-    private static final long NEXT_HAND_DELAY_TICKS = 60L; // 3s breather before the next hand deals in
 
     private final Plugin plugin;
     private final TableDisplayManager display;
@@ -71,6 +70,17 @@ public final class PokerTable {
 
         /** Called right after a seat is vacated, so any per-seat UI element for it can be torn down. */
         default void seatVacated(int seatIndex) {
+        }
+
+        /**
+         * Called whenever whether a "開始這一局" prompt at the table center should be showing might
+         * have changed - i.e. the table is idle (WAITING, not paused) with at least 2 seated, so a
+         * hand could start but hasn't yet, either because it's the first hand or the previous one
+         * just ended. Hands never start on their own anymore; a seated player has to click this
+         * prompt (or an admin has to run /holdemadmin start) every single time, including between
+         * hands, so nobody gets dealt in before they're ready.
+         */
+        default void updateStartPrompt(boolean shouldShow) {
         }
     }
 
@@ -165,10 +175,7 @@ public final class PokerTable {
             turnUi.seatOccupied(player, seatIndex);
         }
         broadcast(player.getName() + " 坐上了第 " + (seatIndex + 1) + " 號座位（籌碼：" + balance + "）");
-
-        if (stage == GameStage.WAITING && countOccupied() >= 2) {
-            Bukkit.getScheduler().runTaskLater(plugin, this::startHand, NEXT_HAND_DELAY_TICKS);
-        }
+        syncStartPrompt();
         return null;
     }
 
@@ -206,6 +213,7 @@ public final class PokerTable {
             turnUi.seatVacated(seatIndex);
         }
         seats[seatIndex].vacate();
+        syncStartPrompt();
     }
 
     public int seatIndexOf(UUID uuid) {
@@ -226,6 +234,7 @@ public final class PokerTable {
         applyBustRules();
         if (countOccupied() < 2) {
             stage = GameStage.WAITING;
+            syncStartPrompt();
             return;
         }
 
@@ -273,6 +282,7 @@ public final class PokerTable {
         }
 
         stage = GameStage.PRE_FLOP;
+        syncStartPrompt();
         broadcast("新的一局開始！莊家鈕：第 " + (dealerButton + 1) + " 號座位，小盲：第 " + (sbIndex + 1)
                 + " 號（" + config.smallBlind() + "），大盲：第 " + (bbIndex + 1) + " 號（" + config.bigBlind() + "）。");
 
@@ -593,7 +603,7 @@ public final class PokerTable {
         broadcast(winner.occupantName() + " 靠棄牌獲勝，贏得 " + total + " 籌碼！");
         stage = GameStage.SHOWDOWN;
         actingSeatIndex = -1;
-        Bukkit.getScheduler().runTaskLater(plugin, this::cleanupAndMaybeStartNext, FOLD_WIN_DELAY_TICKS);
+        Bukkit.getScheduler().runTaskLater(plugin, this::cleanupAfterHand, FOLD_WIN_DELAY_TICKS);
     }
 
     private void runShowdown() {
@@ -645,7 +655,7 @@ public final class PokerTable {
         broadcast(summary.toString());
 
         actingSeatIndex = -1;
-        Bukkit.getScheduler().runTaskLater(plugin, this::cleanupAndMaybeStartNext, SHOWDOWN_DELAY_TICKS);
+        Bukkit.getScheduler().runTaskLater(plugin, this::cleanupAfterHand, SHOWDOWN_DELAY_TICKS);
     }
 
     private int distanceFromDealer(int seatIndex) {
@@ -653,7 +663,7 @@ public final class PokerTable {
         return Math.floorMod(seatIndex - from, seats.length);
     }
 
-    private void cleanupAndMaybeStartNext() {
+    private void cleanupAfterHand() {
         for (int idx : pendingLeave) {
             vacateNow(idx);
         }
@@ -673,10 +683,7 @@ public final class PokerTable {
 
         stage = GameStage.WAITING;
         actingSeatIndex = -1;
-
-        if (countOccupied() >= 2) {
-            Bukkit.getScheduler().runTaskLater(plugin, this::startHand, NEXT_HAND_DELAY_TICKS);
-        }
+        syncStartPrompt();
     }
 
     public boolean isPaused() {
@@ -694,6 +701,7 @@ public final class PokerTable {
             turnUi.clear();
         }
         broadcast("管理員已暫停這桌，請稍候。");
+        syncStartPrompt();
         return null;
     }
 
@@ -708,7 +716,15 @@ public final class PokerTable {
                 || stage == GameStage.TURN || stage == GameStage.RIVER)) {
             promptTurn(actingSeatIndex);
         }
+        syncStartPrompt();
         return null;
+    }
+
+    /** Recomputes whether the "開始這一局" prompt should be showing and tells the UI layer if so. */
+    private void syncStartPrompt() {
+        if (turnUi != null) {
+            turnUi.updateStartPrompt(stage == GameStage.WAITING && !paused && countOccupied() >= 2);
+        }
     }
 
     /** Admin command backing table deletion: voids any hand in progress and kicks every seated player out, refunding chips. */
@@ -742,6 +758,7 @@ public final class PokerTable {
         stage = GameStage.WAITING;
         actingSeatIndex = -1;
         broadcast("管理員已強制重置牌桌，這一局的下注已全數退還。");
+        syncStartPrompt();
     }
 
     // ---------------------------------------------------------------- seat traversal helpers

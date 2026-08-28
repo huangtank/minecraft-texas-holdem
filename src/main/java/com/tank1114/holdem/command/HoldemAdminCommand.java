@@ -56,7 +56,7 @@ public final class HoldemAdminCommand implements CommandExecutor, TabCompleter {
     private void sendTopLevelUsage(CommandSender sender) {
         sender.sendMessage(Component.text(String.join("\n",
                 "德州撲克管理指令：",
-                "  /holdemadmin table create        站在要放新牌桌中心（公共牌）的位置，建立一張新桌並自動生成座位",
+                "  /holdemadmin table create [編號]  站在要放新牌桌中心（公共牌）的位置，建立一張新桌並自動生成座位；不給編號就自動從 1 開始補空缺",
                 "  /holdemadmin table list          列出所有牌桌的編號、座標與狀態",
                 "  /holdemadmin table delete <編號>  強制結束該桌、退還所有籌碼並徹底刪除這張桌子",
                 "  /holdemadmin table cleanup       清除舊版單桌測試留下的殘留牌桌物件（不會動到現有的桌子）",
@@ -70,7 +70,7 @@ public final class HoldemAdminCommand implements CommandExecutor, TabCompleter {
 
     private void handleTable(CommandSender sender, String[] args) {
         if (args.length < 2) {
-            sender.sendMessage(Component.text("用法：/holdemadmin table <create|list|delete>"));
+            sender.sendMessage(Component.text("用法：/holdemadmin table <create [編號]|list|delete <編號>|cleanup>"));
             return;
         }
         switch (args[1].toLowerCase()) {
@@ -79,8 +79,14 @@ public final class HoldemAdminCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage(Component.text("這個指令只能由玩家使用（需要站在要設定的位置上）。"));
                     return;
                 }
-                int id = tableManager.createTable(player.getLocation());
-                sender.sendMessage(Component.text("已建立第 " + id + " 號牌桌，" + config.seatCount() + " 個座位已自動生成在四周並面向中心。"));
+                Integer requestedId = null;
+                if (args.length >= 3) {
+                    requestedId = parseId(sender, args[2]);
+                    if (requestedId == null) {
+                        return;
+                    }
+                }
+                sender.sendMessage(Component.text(tableManager.createTable(player.getLocation(), requestedId)));
             }
             case "list" -> sender.sendMessage(Component.text(tableManager.describeAll()));
             case "delete" -> {
@@ -95,7 +101,7 @@ public final class HoldemAdminCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(Component.text(tableManager.deleteTable(id)));
             }
             case "cleanup" -> sender.sendMessage(Component.text(tableManager.cleanupOrphans()));
-            default -> sender.sendMessage(Component.text("用法：/holdemadmin table <create|list|delete|cleanup>"));
+            default -> sender.sendMessage(Component.text("用法：/holdemadmin table <create [編號]|list|delete <編號>|cleanup>"));
         }
     }
 

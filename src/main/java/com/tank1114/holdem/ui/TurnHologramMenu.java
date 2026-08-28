@@ -60,6 +60,8 @@ public final class TurnHologramMenu implements Listener, PokerTable.TurnUi {
     // half-width), so this offset has to clear 0.5 + 0.25 to sit fully outside the seat's own
     // footprint - otherwise clicking the seat can hit the button instead (or vice versa).
     private static final double LEAVE_BUTTON_BACKWARD = 1.0;
+    /** Above the (empty, during WAITING) tabletop and community-card row so it never overlaps them. */
+    private static final double START_PROMPT_UP = 1.6;
 
     private final Plugin plugin;
     private final PokerTable table;
@@ -76,6 +78,11 @@ public final class TurnHologramMenu implements Listener, PokerTable.TurnUi {
     // ---- persistent "leave seat" hologram: one per occupied seat, independent of turn order ----
     private final Map<Integer, List<Entity>> leaveEntities = new HashMap<>();
     private final Map<UUID, UUID> leaveButtonOwner = new HashMap<>();
+
+    // ---- "開始這一局" hologram at the table center: public, visible to everyone, one at a time ----
+    private final List<Entity> startPromptEntities = new ArrayList<>();
+    private UUID startPromptHitboxId;
+    private boolean startPromptShown;
 
     public TurnHologramMenu(Plugin plugin, PokerTable table, TableLayout layout, BetAmountChatListener chatListener) {
         this.plugin = plugin;
@@ -215,6 +222,8 @@ public final class TurnHologramMenu implements Listener, PokerTable.TurnUi {
         for (int seatIndex : new ArrayList<>(leaveEntities.keySet())) {
             despawnLeave(seatIndex);
         }
+        despawnStartPrompt();
+        startPromptShown = false;
     }
 
     /**
@@ -263,6 +272,62 @@ public final class TurnHologramMenu implements Listener, PokerTable.TurnUi {
                 entity.remove();
             }
         }
+    }
+
+    /**
+     * The "開始這一局" prompt at the table center: unlike everything else here, it's public - not
+     * hidden from anyone - since starting the hand isn't private information. Idempotent so the
+     * frequent {@code syncStartPrompt()} calls in {@link PokerTable} (on every seat/stage change)
+     * don't constantly tear it down and respawn it while it's already showing.
+     */
+    @Override
+    public void updateStartPrompt(boolean shouldShow) {
+        if (shouldShow == startPromptShown) {
+            return;
+        }
+        startPromptShown = shouldShow;
+        if (shouldShow) {
+            spawnStartPrompt();
+        } else {
+            despawnStartPrompt();
+        }
+    }
+
+    private void spawnStartPrompt() {
+        Location loc = layout.center().clone().add(0, START_PROMPT_UP, 0);
+        TextDisplay label = spawnLabel(loc, "點擊開始這一局");
+        Interaction hitbox = spawnHitbox(loc);
+        startPromptEntities.add(label);
+        startPromptEntities.add(hitbox);
+        startPromptHitboxId = hitbox.getUniqueId();
+    }
+
+    private void despawnStartPrompt() {
+        for (Entity entity : startPromptEntities) {
+            if (entity.isValid()) {
+                entity.remove();
+            }
+        }
+        startPromptEntities.clear();
+        startPromptHitboxId = null;
+    }
+
+    /** Any seated player (not a bystander) can start the hand this way, same as an admin's /holdemadmin start. */
+    @EventHandler
+    public void onStartPromptInteract(PlayerInteractEntityEvent event) {
+        if (startPromptHitboxId == null || !event.getRightClicked().getUniqueId().equals(startPromptHitboxId)) {
+            return;
+        }
+        event.setCancelled(true);
+        Player player = event.getPlayer();
+        if (table.seatIndexOf(player.getUniqueId()) < 0) {
+            player.sendMessage(Component.text("你要先入座才能開始遊戲。"));
+            return;
+        }
+        if (table.stage() != GameStage.WAITING) {
+            return;
+        }
+        table.startHand();
     }
 
     /** Right-clicking one of the temporary action items in hand performs the action it's tagged with. */
