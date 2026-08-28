@@ -16,29 +16,28 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Captures a free-typed chat message as a custom bet/raise amount, so entering a precise
- * number never requires a slash command - just plain chat after pressing "自訂金額".
+ * number never requires a slash command - just plain chat after clicking the "自訂金額"
+ * hologram button. Shared across every table: each pending request carries its own table
+ * reference, since a player could in principle be prompted by any of them.
  */
 public final class BetAmountChatListener implements Listener {
 
     private final Plugin plugin;
-    private final PokerTable table;
-    private final Map<UUID, PlayerAction> pending = new ConcurrentHashMap<>();
+    private final Map<UUID, PendingAmount> pending = new ConcurrentHashMap<>();
 
-    public BetAmountChatListener(Plugin plugin, PokerTable table) {
+    public BetAmountChatListener(Plugin plugin) {
         this.plugin = plugin;
-        this.table = table;
     }
 
-    public void requestAmount(Player player, PlayerAction action) {
-        pending.put(player.getUniqueId(), action);
-        player.closeInventory();
+    public void requestAmount(Player player, PlayerAction action, PokerTable table) {
+        pending.put(player.getUniqueId(), new PendingAmount(action, table));
         player.sendMessage(Component.text("請直接在聊天室輸入金額（數字），或輸入 cancel 取消。"));
     }
 
     @EventHandler
     public void onChat(AsyncPlayerChatEvent event) {
-        PlayerAction action = pending.remove(event.getPlayer().getUniqueId());
-        if (action == null) {
+        PendingAmount request = pending.remove(event.getPlayer().getUniqueId());
+        if (request == null) {
             return;
         }
         event.setCancelled(true);
@@ -57,10 +56,13 @@ public final class BetAmountChatListener implements Listener {
                 player.sendMessage(Component.text("金額必須是整數，操作已取消，請重新點選按鈕。"));
                 return;
             }
-            String error = table.performAction(player.getUniqueId(), action, amount);
+            String error = request.table().performAction(player.getUniqueId(), request.action(), amount);
             if (error != null) {
                 player.sendMessage(Component.text(error));
             }
         });
+    }
+
+    private record PendingAmount(PlayerAction action, PokerTable table) {
     }
 }

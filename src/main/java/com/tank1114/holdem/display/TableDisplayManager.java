@@ -7,8 +7,10 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.World;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.type.Stairs;
+import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.BlockDisplay;
 import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
@@ -16,6 +18,7 @@ import org.bukkit.entity.Interaction;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Transformation;
@@ -39,10 +42,17 @@ public final class TableDisplayManager {
     private static final double SEAT_CARD_FORWARD = 0.55;
     private static final double SEAT_CARD_UP = 1.15;
     private static final double SEAT_CARD_SPACING = 0.18;
-    private static final double COMMUNITY_UP = 1.25;
+    /** Height of the tabletop's own flat top surface above the center point. */
+    private static final double TABLE_SURFACE_UP = 1.0;
+    /** Community cards float just above the tabletop surface so they never render inside it. */
+    private static final double COMMUNITY_UP = TABLE_SURFACE_UP + 0.08;
     private static final double COMMUNITY_SPACING = 0.32;
     private static final float CARD_SCALE = 0.45f;
+    /** Tabletop radius relative to seat radius - kept well under 1.0 so chairs never overlap the table's edge. */
+    private static final double TABLE_RADIUS_RATIO = 0.6;
     private static final double MANAGED_ENTITY_SEARCH_RADIUS = 12.0;
+    private static final double AVATAR_UP = 0.3;
+    private static final double AVATAR_FORWARD = 0.15;
 
     private final Plugin plugin;
     private final NamespacedKey managedKey;
@@ -53,6 +63,7 @@ public final class TableDisplayManager {
     private BlockDisplay tableProp;
     private ItemDisplay[][] holeCardDisplays; // [seat][0 or 1]
     private ItemDisplay[] communityCardDisplays; // size 5
+    private ArmorStand[] occupantAvatars;
     private final Map<UUID, Integer> seatMarkerToSeat = new HashMap<>();
 
     public TableDisplayManager(Plugin plugin) {
@@ -79,6 +90,7 @@ public final class TableDisplayManager {
         chairProps = new BlockDisplay[seatCount];
         holeCardDisplays = new ItemDisplay[seatCount][2];
         communityCardDisplays = new ItemDisplay[5];
+        occupantAvatars = new ArmorStand[seatCount];
         seatMarkerToSeat.clear();
 
         for (int i = 0; i < seatCount; i++) {
@@ -97,7 +109,7 @@ public final class TableDisplayManager {
         }
 
         Location center = layout.center();
-        double tableRadius = layout.seatCount() > 0 ? center.distance(layout.seat(0)) * 0.75 : 1.5;
+        double tableRadius = layout.seatCount() > 0 ? center.distance(layout.seat(0)) * TABLE_RADIUS_RATIO : 1.5;
         tableProp = spawnTableProp(center, tableRadius);
         Vector right = rightVector(center);
         Location communityBase = center.clone().add(0, COMMUNITY_UP, 0);
@@ -151,16 +163,56 @@ public final class TableDisplayManager {
                 }
             }
         }
+        if (occupantAvatars != null) {
+            for (ArmorStand avatar : occupantAvatars) {
+                if (avatar != null && avatar.isValid()) {
+                    avatar.remove();
+                }
+            }
+        }
         seatMarkerToSeat.clear();
         seatMarkers = null;
         chairProps = null;
         tableProp = null;
         holeCardDisplays = null;
         communityCardDisplays = null;
+        occupantAvatars = null;
     }
 
     public boolean isBuilt() {
         return seatMarkers != null;
+    }
+
+    /**
+     * Removes every plugin-tagged entity in every loaded world that isn't within reach of any
+     * currently live table's center. Before multi-table support, re-running the setup command
+     * at a new spot only ever tracked one center point, so the old spot's chairs/markers/cards
+     * were left behind as permanent debris - this sweeps that up regardless of where it ended up,
+     * without ever touching a table that's actually still in use. Returns how many were removed.
+     */
+    public static int removeOrphans(Plugin plugin, List<Location> liveCenters) {
+        NamespacedKey key = new NamespacedKey(plugin, "managed");
+        int removed = 0;
+        for (World world : Bukkit.getWorlds()) {
+            for (Entity entity : world.getEntities()) {
+                if (!entity.getPersistentDataContainer().has(key, PersistentDataType.BYTE)) {
+                    continue;
+                }
+                boolean nearLiveTable = false;
+                for (Location center : liveCenters) {
+                    if (center.getWorld().equals(world)
+                            && center.distance(entity.getLocation()) <= MANAGED_ENTITY_SEARCH_RADIUS) {
+                        nearLiveTable = true;
+                        break;
+                    }
+                }
+                if (!nearLiveTable) {
+                    entity.remove();
+                    removed++;
+                }
+            }
+        }
+        return removed;
     }
 
     public void setHoleCards(int seatIndex, List<Card> cards, Player owner) {
@@ -198,6 +250,50 @@ public final class TableDisplayManager {
                 player.showEntity(plugin, display);
             }
         }
+    }
+
+    /**
+     * Spawns a small floating player-head marker sitting on a seat's chair, visible to everyone,
+     * so an occupied seat is recognizable at a glance without needing to walk up and check.
+     */
+    public void setOccupantAvatar(int seatIndex, Player player) {
+        if (occupantAvatars == null) {
+            return;
+        }
+        removeOccupantAvatar(seatIndex);
+        Location seatLoc = seatMarkers[seatIndex].getLocation();
+        Location avatarLoc = seatLoc.clone().add(0, AVATAR_UP, 0)
+                .add(seatLoc.getDirection().setY(0).normalize().multiply(AVATAR_FORWARD));
+        avatarLoc.setYaw(seatLoc.getYaw());
+        occupantAvatars[seatIndex] = avatarLoc.getWorld().spawn(avatarLoc, ArmorStand.class, entity -> {
+            entity.setSmall(true);
+            entity.setInvisible(true);
+            entity.setBasePlate(false);
+            entity.setArms(false);
+            entity.setMarker(true);
+            entity.setPersistent(true);
+            entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
+            ItemStack skull = new ItemStack(Material.PLAYER_HEAD);
+            SkullMeta meta = (SkullMeta) skull.getItemMeta();
+            meta.setOwningPlayer(player);
+            skull.setItemMeta(meta);
+            entity.getEquipment().setHelmet(skull);
+        });
+    }
+
+    public void clearOccupantAvatar(int seatIndex) {
+        removeOccupantAvatar(seatIndex);
+    }
+
+    private void removeOccupantAvatar(int seatIndex) {
+        if (occupantAvatars == null) {
+            return;
+        }
+        ArmorStand existing = occupantAvatars[seatIndex];
+        if (existing != null && existing.isValid()) {
+            existing.remove();
+        }
+        occupantAvatars[seatIndex] = null;
     }
 
     public void setCommunityCard(int index, Card card) {
@@ -271,17 +367,32 @@ public final class TableDisplayManager {
     private BlockDisplay spawnChairProp(Location seatLoc) {
         return seatLoc.getWorld().spawn(seatLoc, BlockDisplay.class, entity -> {
             Stairs stairs = (Stairs) org.bukkit.Material.OAK_STAIRS.createBlockData();
-            stairs.setFacing(yawToFacing(seatLoc.getYaw()));
+            // Fixed reference orientation (yaw 0 / south) - the actual per-seat angle is applied below
+            // via a continuous rotation, not this discrete block state.
+            stairs.setFacing(BlockFace.SOUTH);
             entity.setBlock(stairs);
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
-            entity.setTransformation(new Transformation(
-                    new Vector3f(-0.5f, 0f, -0.5f),
-                    new Quaternionf(),
-                    new Vector3f(1f, 1f, 1f),
-                    new Quaternionf()
-            ));
+            // +180: a stair block's "facing" state points its tall riser face that way, which is the
+            // side a player would stand behind - i.e. away from the seat's own forward (seat-to-center)
+            // direction. Rotating the SOUTH-baked mesh by the seat's yaw alone therefore leaves every
+            // chair pointing outward; adding 180 degrees turns the riser away from center so the open
+            // step faces the table instead.
+            entity.setTransformation(yawRotatedUnitBlock(seatLoc.getYaw() + 180f));
         });
+    }
+
+    /**
+     * A 1x1x1 block's transformation, rotated in place around its own center to face an exact yaw.
+     * Six seats are spaced 60 degrees apart, but {@link org.bukkit.block.data.type.Stairs}'s "facing"
+     * block state only offers 4 cardinal directions - snapping to the nearest one would leave most
+     * chairs up to 30 degrees off. Rotating the display's transformation instead hits the exact angle.
+     */
+    private Transformation yawRotatedUnitBlock(float yawDegrees) {
+        Quaternionf rotation = new Quaternionf().rotateY((float) Math.toRadians(-yawDegrees));
+        Vector3f center = new Vector3f(0.5f, 0.5f, 0.5f);
+        Vector3f translation = new Vector3f(center).sub(rotation.transform(new Vector3f(center)));
+        return new Transformation(translation, rotation, new Vector3f(1f, 1f, 1f), new Quaternionf());
     }
 
     /** Purely decorative "tabletop" under the community cards so the table is visible even with no cards dealt. */
@@ -291,26 +402,16 @@ public final class TableDisplayManager {
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
             float diameter = (float) (radius * 2);
+            // Slab block models occupy the bottom half (y 0 to 0.5) of their local unit cube, so
+            // translating up by (TABLE_SURFACE_UP - 0.5) puts the slab's flat top exactly at
+            // TABLE_SURFACE_UP - below the community cards, never poking through them.
             entity.setTransformation(new Transformation(
-                    new Vector3f(-diameter / 2f, (float) (COMMUNITY_UP - 0.4), -diameter / 2f),
+                    new Vector3f(-diameter / 2f, (float) (TABLE_SURFACE_UP - 0.5), -diameter / 2f),
                     new Quaternionf(),
                     new Vector3f(diameter, 1f, diameter),
                     new Quaternionf()
             ));
         });
-    }
-
-    private BlockFace yawToFacing(float yaw) {
-        float normalized = ((yaw % 360) + 360) % 360;
-        if (normalized >= 315 || normalized < 45) {
-            return BlockFace.SOUTH;
-        } else if (normalized < 135) {
-            return BlockFace.WEST;
-        } else if (normalized < 225) {
-            return BlockFace.NORTH;
-        } else {
-            return BlockFace.EAST;
-        }
     }
 
     private ItemDisplay spawnCardDisplay(Location location) {

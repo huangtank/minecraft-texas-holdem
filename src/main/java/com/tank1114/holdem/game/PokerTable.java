@@ -55,10 +55,23 @@ public final class PokerTable {
 
     private BukkitTask turnTimeoutTask;
     private TurnUi turnUi;
+    private boolean paused;
 
-    /** Lets a UI layer (a GUI menu) present itself whenever it becomes a seated player's turn to act. */
+    /** Lets a UI layer (the hologram action menu) present itself whenever it becomes a seated player's turn to act. */
     public interface TurnUi {
         void promptTurn(Player player, int seatIndex);
+
+        /** Called whenever a hand ends without another promptTurn following, so any open menu can be torn down. */
+        default void clear() {
+        }
+
+        /** Called right after a player sits down, so a per-seat UI element (e.g. a "leave seat" button) can appear. */
+        default void seatOccupied(Player player, int seatIndex) {
+        }
+
+        /** Called right after a seat is vacated, so any per-seat UI element for it can be torn down. */
+        default void seatVacated(int seatIndex) {
+        }
     }
 
     public PokerTable(Plugin plugin, TableDisplayManager display, ChipStorage chipStorage, HoldemConfig config) {
@@ -147,6 +160,10 @@ public final class PokerTable {
 
         seat.seat(player.getUniqueId(), player.getName(), balance);
         display.reapplyVisibility(player, seatIndex);
+        display.setOccupantAvatar(seatIndex, player);
+        if (turnUi != null) {
+            turnUi.seatOccupied(player, seatIndex);
+        }
         broadcast(player.getName() + " 坐上了第 " + (seatIndex + 1) + " 號座位（籌碼：" + balance + "）");
 
         if (stage == GameStage.WAITING && countOccupied() >= 2) {
@@ -176,10 +193,19 @@ public final class PokerTable {
             return;
         }
         chipStorage.set(seat.occupant(), seat.stack());
-        display.clearHoleCards(seatIndex);
         String name = seat.occupantName();
-        seat.vacate();
+        vacateSeat(seatIndex);
         broadcast(name + " 離開了座位。");
+    }
+
+    /** Shared cleanup for freeing a seat: cards, avatar, and any per-seat UI (leave button) all go together. */
+    private void vacateSeat(int seatIndex) {
+        display.clearHoleCards(seatIndex);
+        display.clearOccupantAvatar(seatIndex);
+        if (turnUi != null) {
+            turnUi.seatVacated(seatIndex);
+        }
+        seats[seatIndex].vacate();
     }
 
     public int seatIndexOf(UUID uuid) {
@@ -194,6 +220,9 @@ public final class PokerTable {
     // ---------------------------------------------------------------- hand lifecycle
 
     public void startHand() {
+        if (paused) {
+            return;
+        }
         applyBustRules();
         if (countOccupied() < 2) {
             stage = GameStage.WAITING;
@@ -265,8 +294,7 @@ public final class PokerTable {
                 }
                 case DISABLED, ADMIN_ONLY -> {
                     chipStorage.set(seat.occupant(), 0);
-                    display.clearHoleCards(seat.index());
-                    seat.vacate();
+                    vacateSeat(seat.index());
                     broadcast(name + " 籌碼歸零，已離座。");
                 }
             }
@@ -276,6 +304,9 @@ public final class PokerTable {
     // ---------------------------------------------------------------- betting
 
     public String performAction(UUID uuid, PlayerAction action, long amount) {
+        if (paused) {
+            return "牌桌已被管理員暫停，請稍後再試。";
+        }
         if (stage == GameStage.WAITING || stage == GameStage.SHOWDOWN) {
             return "現在沒有進行中的回合可以行動。";
         }
@@ -547,6 +578,9 @@ public final class PokerTable {
 
     private void endHandByFold(int winnerIndex) {
         cancelTurnTimer();
+        if (turnUi != null) {
+            turnUi.clear();
+        }
         long total = potTotal();
         Seat winner = seats[winnerIndex];
         winner.setStack(winner.stack() + total);
@@ -557,6 +591,9 @@ public final class PokerTable {
     }
 
     private void runShowdown() {
+        if (turnUi != null) {
+            turnUi.clear();
+        }
         List<Pot> pots = PotCalculator.compute(List.of(seats));
         for (Seat seat : seats) {
             if (seat.isOccupied() && !seat.isFolded()) {
@@ -636,9 +673,55 @@ public final class PokerTable {
         }
     }
 
+    public boolean isPaused() {
+        return paused;
+    }
+
+    /** Admin command: freeze the table so no one can act and the turn timer stops, without voiding the hand. */
+    public String pause() {
+        if (paused) {
+            return "這桌已經是暫停狀態了。";
+        }
+        paused = true;
+        cancelTurnTimer();
+        if (turnUi != null) {
+            turnUi.clear();
+        }
+        broadcast("管理員已暫停這桌，請稍候。");
+        return null;
+    }
+
+    /** Admin command: undo pause() - re-prompts whoever's turn it was, with a fresh timeout. */
+    public String resume() {
+        if (!paused) {
+            return "這桌沒有在暫停中。";
+        }
+        paused = false;
+        broadcast("管理員已恢復這桌。");
+        if (actingSeatIndex >= 0 && (stage == GameStage.PRE_FLOP || stage == GameStage.FLOP
+                || stage == GameStage.TURN || stage == GameStage.RIVER)) {
+            promptTurn(actingSeatIndex);
+        }
+        return null;
+    }
+
+    /** Admin command backing table deletion: voids any hand in progress and kicks every seated player out, refunding chips. */
+    public void disbandAndVacateAll() {
+        forceReset();
+        for (Seat seat : seats) {
+            if (seat.isOccupied()) {
+                chipStorage.set(seat.occupant(), seat.stack());
+                vacateSeat(seat.index());
+            }
+        }
+    }
+
     /** Admin rescue command: void the current hand, refund whatever was committed, and reset to waiting. */
     public void forceReset() {
         cancelTurnTimer();
+        if (turnUi != null) {
+            turnUi.clear();
+        }
         for (Seat seat : seats) {
             if (seat.isOccupied()) {
                 seat.setStack(seat.stack() + seat.committedThisHand());

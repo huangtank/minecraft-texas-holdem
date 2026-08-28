@@ -1,7 +1,7 @@
 package com.tank1114.holdem.listener;
 
-import com.tank1114.holdem.display.TableDisplayManager;
-import com.tank1114.holdem.game.PokerTable;
+import com.tank1114.holdem.table.TableInstance;
+import com.tank1114.holdem.table.TableManager;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -16,17 +16,18 @@ import org.bukkit.event.Listener;
  */
 public final class PlayerConnectionListener implements Listener {
 
-    private final PokerTable table;
-    private final TableDisplayManager display;
+    private final TableManager tableManager;
 
-    public PlayerConnectionListener(PokerTable table, TableDisplayManager display) {
-        this.table = table;
-        this.display = display;
+    public PlayerConnectionListener(TableManager tableManager) {
+        this.tableManager = tableManager;
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        table.handlePlayerQuit(event.getPlayer().getUniqueId());
+        TableInstance instance = tableManager.findTableOfPlayer(event.getPlayer().getUniqueId());
+        if (instance != null) {
+            instance.table().handlePlayerQuit(event.getPlayer().getUniqueId());
+        }
     }
 
     @EventHandler
@@ -40,10 +41,10 @@ public final class PlayerConnectionListener implements Listener {
     }
 
     private void reapply(Player player) {
-        if (!display.isBuilt()) {
+        TableInstance instance = tableManager.findTableOfPlayer(player.getUniqueId());
+        if (instance == null) {
             return;
         }
-        int seatIndex = table.seatIndexOf(player.getUniqueId());
-        display.reapplyVisibility(player, seatIndex);
+        instance.display().reapplyVisibility(player, instance.table().seatIndexOf(player.getUniqueId()));
     }
 }

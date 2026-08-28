@@ -3,12 +3,12 @@ version: '${version}'
 main: com.tank1114.holdem.HoldemPlugin
 api-version: '26.2'
 author: tank1114
-description: 實體牌桌德州撲克，固定六人桌，虛擬籌碼。
+description: 實體牌桌德州撲克，可建立多張六人桌，虛擬籌碼。
 
 commands:
   holdemadmin:
     description: 德州撲克管理指令
-    usage: /<command> <setup|start|reset|rebuy|chips>
+    usage: /<command> <table|start|reset|pause|resume|rebuy|chips>
     permission: holdem.admin
 
 permissions:

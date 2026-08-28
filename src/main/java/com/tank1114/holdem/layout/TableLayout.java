@@ -26,8 +26,15 @@ public final class TableLayout {
         return center;
     }
 
+    /**
+     * Stores the center point, always flattened to pitch 0. The table prop and community cards are
+     * spawned directly at (or offset from) this location, and a display entity's own pitch tilts its
+     * whole model - without this, the table would render tilted at whatever pitch the admin happened
+     * to be looking at when they ran the setup command.
+     */
     public void setCenter(Location center) {
-        this.center = center;
+        this.center = center.clone();
+        this.center.setPitch(0f);
     }
 
     /** Seat index 0 sits at the center's own facing direction; the rest are spaced evenly around the ring. */
