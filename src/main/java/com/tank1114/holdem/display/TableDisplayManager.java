@@ -367,18 +367,14 @@ public final class TableDisplayManager {
     private BlockDisplay spawnChairProp(Location seatLoc) {
         return seatLoc.getWorld().spawn(seatLoc, BlockDisplay.class, entity -> {
             Stairs stairs = (Stairs) org.bukkit.Material.OAK_STAIRS.createBlockData();
-            // Fixed reference orientation (yaw 0 / south) - the actual per-seat angle is applied below
-            // via a continuous rotation, not this discrete block state.
-            stairs.setFacing(BlockFace.SOUTH);
+            // 這裡我相信 Gemini
+            // 1. 不要設定 BlockFace，讓方塊保持預設基準，避免與矩陣旋轉發生坐標系衝突
             entity.setBlock(stairs);
             entity.setPersistent(true);
             entity.getPersistentDataContainer().set(managedKey, PersistentDataType.BYTE, (byte) 1);
-            // +180: a stair block's "facing" state points its tall riser face that way, which is the
-            // side a player would stand behind - i.e. away from the seat's own forward (seat-to-center)
-            // direction. Rotating the SOUTH-baked mesh by the seat's yaw alone therefore leaves every
-            // chair pointing outward; adding 180 degrees turns the riser away from center so the open
-            // step faces the table instead.
-            entity.setTransformation(yawRotatedUnitBlock(seatLoc.getYaw() + 180f));
+            
+            // 2. 統一由 yawRotatedUnitBlock 透過座位角度進行精準的旋轉與置中對齊
+            entity.setTransformation(yawRotatedUnitBlock(seatLoc.getYaw()));
         });
     }
 

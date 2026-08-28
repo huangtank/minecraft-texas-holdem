@@ -37,10 +37,14 @@ import java.util.function.BiConsumer;
 public final class TurnHologramMenu implements Listener, PokerTable.TurnUi {
 
     private static final double BUTTON_TOP = 2.9;
-    private static final double BUTTON_FORWARD = 0.3;
+    // The seat's own click hitbox (see TableDisplayManager#spawnSeatMarker) is 0.8 wide, i.e. it
+    // reaches 0.4 out from the seat's center in every direction. A button hitbox is 0.5 wide (0.25
+    // half-width), so this offset has to clear 0.4 + 0.25 to sit fully outside the seat's own
+    // footprint - otherwise clicking the seat can hit a button instead (or vice versa).
+    private static final double BUTTON_FORWARD = 1.0;
     private static final double BUTTON_VSPACING = 0.35;
     private static final double LEAVE_BUTTON_UP = 2.9;
-    private static final double LEAVE_BUTTON_BACKWARD = 0.3;
+    private static final double LEAVE_BUTTON_BACKWARD = 1.0;
 
     private final Plugin plugin;
     private final PokerTable table;
