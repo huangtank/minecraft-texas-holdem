@@ -326,14 +326,14 @@ public final class PokerTable {
             }
             case CHECK -> {
                 if (seat.committedThisRound() != currentBet) {
-                    return "目前有人下注，不能看牌，請跟注、加注或棄牌。";
+                    return "目前有人下注，不能過牌，請跟注、加注或棄牌。";
                 }
                 seat.markActed();
-                broadcast(seat.occupantName() + " 看牌。");
+                broadcast(seat.occupantName() + " 過牌。");
             }
             case CALL -> {
                 if (currentBet == seat.committedThisRound()) {
-                    return "目前沒有需要跟注的金額，請用看牌（check）。";
+                    return "目前沒有需要跟注的金額，請用過牌（check）。";
                 }
                 long need = currentBet - seat.committedThisRound();
                 long actual = seat.commit(need);
@@ -427,10 +427,16 @@ public final class PokerTable {
         }
     }
 
+    /**
+     * True once every seat still in the hand has either matched the current bet (having acted
+     * since the last raise) or is all-in and therefore can't act again. Deliberately does *not*
+     * short-circuit on "at most one non-all-in player left" the way {@link #beginBettingOrRunout()}
+     * does: that's only safe to skip straight to showdown at the *start* of a betting round, before
+     * anyone's acted. Mid-round - e.g. right after someone shoves all-in and that shove happens to
+     * leave only one other active player - that remaining player still has to call or fold the raise
+     * before the round is actually over; going all-in does not skip everyone straight to the flop.
+     */
     private boolean bettingRoundComplete() {
-        if (countActive() <= 1) {
-            return true;
-        }
         for (Seat seat : seats) {
             if (seat.isActive() && (!seat.isActedThisRound() || seat.committedThisRound() != currentBet)) {
                 return false;

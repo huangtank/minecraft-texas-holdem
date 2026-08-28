@@ -3,6 +3,7 @@ package com.tank1114.holdem.display;
 import com.tank1114.holdem.engine.Card;
 import com.tank1114.holdem.layout.TableLayout;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -34,8 +35,12 @@ import java.util.UUID;
 
 /**
  * Owns every entity that makes the fixed poker table physically visible in the world:
- * per-seat "chair" interaction hitboxes, per-seat hidden hole-card item displays,
- * and the shared community-card item displays.
+ * per-seat "chair" interaction hitboxes, per-seat hidden hole-card item displays, and the
+ * community cards. Seated players are arranged in a ring, so a single shared row of community
+ * cards would read backwards or sideways for half the table; instead there's one full copy of
+ * the community-card row per seat, laid out to read left-to-right from that seat's own angle,
+ * and hidden from every other *occupied* seat the same way hole cards are hidden - a spectator
+ * or an unseated player still sees every copy, since nothing here is actually secret.
  */
 public final class TableDisplayManager {
 
@@ -46,7 +51,7 @@ public final class TableDisplayManager {
     private static final double TABLE_SURFACE_UP = 1.0;
     /** Community cards float just above the tabletop surface so they never render inside it. */
     private static final double COMMUNITY_UP = TABLE_SURFACE_UP + 0.08;
-    private static final double COMMUNITY_SPACING = 0.32;
+    private static final double COMMUNITY_SPACING = 0.5;
     private static final float CARD_SCALE = 0.45f;
     /** Tabletop radius relative to seat radius - kept well under 1.0 so chairs never overlap the table's edge. */
     private static final double TABLE_RADIUS_RATIO = 0.6;
@@ -62,8 +67,9 @@ public final class TableDisplayManager {
     private BlockDisplay[] chairProps;
     private BlockDisplay tableProp;
     private ItemDisplay[][] holeCardDisplays; // [seat][0 or 1]
-    private ItemDisplay[] communityCardDisplays; // size 5
+    private ItemDisplay[][] communityCardDisplays; // [viewing seat][0..4] - one full copy of the row per seat
     private ArmorStand[] occupantAvatars;
+    private UUID[] seatOccupants; // tracks who's seated where, purely to drive per-seat community-card visibility
     private final Map<UUID, Integer> seatMarkerToSeat = new HashMap<>();
 
     public TableDisplayManager(Plugin plugin) {
@@ -89,8 +95,9 @@ public final class TableDisplayManager {
         seatMarkers = new Interaction[seatCount];
         chairProps = new BlockDisplay[seatCount];
         holeCardDisplays = new ItemDisplay[seatCount][2];
-        communityCardDisplays = new ItemDisplay[5];
+        communityCardDisplays = new ItemDisplay[seatCount][5];
         occupantAvatars = new ArmorStand[seatCount];
+        seatOccupants = new UUID[seatCount];
         seatMarkerToSeat.clear();
 
         for (int i = 0; i < seatCount; i++) {
@@ -111,11 +118,17 @@ public final class TableDisplayManager {
         Location center = layout.center();
         double tableRadius = layout.seatCount() > 0 ? center.distance(layout.seat(0)) * TABLE_RADIUS_RATIO : 1.5;
         tableProp = spawnTableProp(center, tableRadius);
-        Vector right = rightVector(center);
         Location communityBase = center.clone().add(0, COMMUNITY_UP, 0);
-        for (int i = 0; i < 5; i++) {
-            double offset = (i - 2) * COMMUNITY_SPACING;
-            communityCardDisplays[i] = spawnCardDisplay(communityBase.clone().add(right.clone().multiply(offset)));
+        for (int viewingSeat = 0; viewingSeat < seatCount; viewingSeat++) {
+            // Laid out using that seat's own "toward center" direction, not the table's, so the row
+            // reads left-to-right correctly from that specific seat's side of the table.
+            Vector right = rightVector(layout.seat(viewingSeat));
+            for (int i = 0; i < 5; i++) {
+                double offset = (i - 2) * COMMUNITY_SPACING;
+                ItemDisplay display = spawnCardDisplay(communityBase.clone().add(right.clone().multiply(offset)));
+                hideFromEveryone(display);
+                communityCardDisplays[viewingSeat][i] = display;
+            }
         }
     }
 
@@ -157,9 +170,11 @@ public final class TableDisplayManager {
             }
         }
         if (communityCardDisplays != null) {
-            for (ItemDisplay display : communityCardDisplays) {
-                if (display != null && display.isValid()) {
-                    display.remove();
+            for (ItemDisplay[] set : communityCardDisplays) {
+                for (ItemDisplay display : set) {
+                    if (display != null && display.isValid()) {
+                        display.remove();
+                    }
                 }
             }
         }
@@ -177,6 +192,7 @@ public final class TableDisplayManager {
         holeCardDisplays = null;
         communityCardDisplays = null;
         occupantAvatars = null;
+        seatOccupants = null;
     }
 
     public boolean isBuilt() {
@@ -279,10 +295,18 @@ public final class TableDisplayManager {
             skull.setItemMeta(meta);
             entity.getEquipment().setHelmet(skull);
         });
+        if (seatOccupants != null) {
+            seatOccupants[seatIndex] = player.getUniqueId();
+        }
+        refreshCommunityVisibility();
     }
 
     public void clearOccupantAvatar(int seatIndex) {
         removeOccupantAvatar(seatIndex);
+        if (seatOccupants != null) {
+            seatOccupants[seatIndex] = null;
+        }
+        refreshCommunityVisibility();
     }
 
     private void removeOccupantAvatar(int seatIndex) {
@@ -300,15 +324,19 @@ public final class TableDisplayManager {
         if (communityCardDisplays == null) {
             return;
         }
-        applyCard(communityCardDisplays[index], card);
+        for (ItemDisplay[] set : communityCardDisplays) {
+            applyCard(set[index], card);
+        }
     }
 
     public void clearCommunityCards() {
         if (communityCardDisplays == null) {
             return;
         }
-        for (ItemDisplay display : communityCardDisplays) {
-            applyCard(display, null);
+        for (ItemDisplay[] set : communityCardDisplays) {
+            for (ItemDisplay display : set) {
+                applyCard(display, null);
+            }
         }
     }
 
@@ -323,6 +351,50 @@ public final class TableDisplayManager {
                     continue;
                 }
                 if (seat == occupiedSeatOfPlayer) {
+                    player.showEntity(plugin, display);
+                } else {
+                    player.hideEntity(plugin, display);
+                }
+            }
+        }
+        applyCommunityVisibilityForPlayer(player);
+    }
+
+    /** Re-derives every online player's community-card visibility, used whenever seat occupancy changes. */
+    private void refreshCommunityVisibility() {
+        if (communityCardDisplays == null) {
+            return;
+        }
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            applyCommunityVisibilityForPlayer(player);
+        }
+    }
+
+    /**
+     * A player sees exactly one copy of the community-card row: their own seat's copy if they're
+     * seated, or every copy if they aren't seated at this table at all (so a spectator or an
+     * unseated player never sees nothing - nothing here is actually private, unlike hole cards).
+     */
+    private void applyCommunityVisibilityForPlayer(Player player) {
+        if (communityCardDisplays == null) {
+            return;
+        }
+        int viewerSeat = -1;
+        if (seatOccupants != null) {
+            for (int i = 0; i < seatOccupants.length; i++) {
+                if (player.getUniqueId().equals(seatOccupants[i])) {
+                    viewerSeat = i;
+                    break;
+                }
+            }
+        }
+        for (int seat = 0; seat < communityCardDisplays.length; seat++) {
+            boolean shouldSee = viewerSeat < 0 || viewerSeat == seat;
+            for (ItemDisplay display : communityCardDisplays[seat]) {
+                if (display == null || !display.isValid()) {
+                    continue;
+                }
+                if (shouldSee) {
                     player.showEntity(plugin, display);
                 } else {
                     player.hideEntity(plugin, display);
@@ -346,7 +418,8 @@ public final class TableDisplayManager {
         }
         ItemStack item = new ItemStack(Material.PAPER);
         display.setItemStack(item);
-        display.customName(Component.text(card.display()));
+        NamedTextColor color = card.suit().isRed() ? NamedTextColor.RED : NamedTextColor.BLACK;
+        display.customName(Component.text(card.display(), color));
         display.setCustomNameVisible(true);
     }
 

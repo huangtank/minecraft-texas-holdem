@@ -15,4 +15,8 @@ public enum Suit {
     public String symbol() {
         return symbol;
     }
+
+    public boolean isRed() {
+        return this == HEARTS || this == DIAMONDS;
+    }
 }

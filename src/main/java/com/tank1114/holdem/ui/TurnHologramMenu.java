@@ -108,7 +108,7 @@ public final class TurnHologramMenu implements Listener, PokerTable.TurnUi {
         buttons.add(new ButtonSpec(Material.BARRIER, "棄牌",
                 (p, s) -> resolve(p, table.performAction(p.getUniqueId(), PlayerAction.FOLD, 0))));
         buttons.add(new ButtonSpec(Material.CARROT_ON_A_STICK,
-                sizing.toCall() <= 0 ? "看牌" : "跟注 " + Math.min(sizing.toCall(), seat.stack()),
+                sizing.toCall() <= 0 ? "過牌" : "跟注 " + Math.min(sizing.toCall(), seat.stack()),
                 (p, s) -> resolve(p, table.performAction(p.getUniqueId(),
                         sizing.toCall() <= 0 ? PlayerAction.CHECK : PlayerAction.CALL, 0))));
         if (sizing.canRaise()) {
