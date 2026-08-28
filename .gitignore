@@ -1,9 +1,25 @@
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+
+# IDE metadata
 .idea/
 *.iml
 out/
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs / crash dumps
+*.log
+hs_err_pid*.log
 
 # Claude Code project config/skills - not meant for the public repo
 .claude/
